@@ -9,10 +9,10 @@ PKG_LICENSE_FILES:=LICENSE
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
-PKG_SOURCE_URL:=https://github.com/ganehag/open-modbusgateway.git
+PKG_SOURCE_URL:=file:///home/tx/openwrt-src/open-modbusgateway
 PKG_SOURCE_VERSION:=v$(PKG_VERSION)
 
-include $(INCLUDE_DIR)/package.mk
+include $(INCLUDE_DIR)/package.mks
 
 define Package/open-modbusgateway
     SECTION:=net

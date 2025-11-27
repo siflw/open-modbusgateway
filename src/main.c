@@ -1,22 +1,3 @@
-/*
- * This file is part of Open MQTT Modbus Gateway (openmmg)
- * https://github.com/ganehag/open-modbusgateway.
- *
- * Copyright (c) 2023 Mikael Ganehag Brorsson.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 3.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
- */
-
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -43,8 +24,7 @@ static int run = 1;
 const char logfile_path[] = "/var/log/openmmg.log";
 const char pidfile_path[] = "/var/run/openmmg.pid";
 
-void
-usage() {
+void usage() {
     fprintf(logfile, "Usage:\n\topenmmg -c <configfile> [-D] [-d] [-v] [-h]\n");
     fprintf(logfile, "Options:\n");
     fprintf(logfile, "\t-c <configfile>\t\tPath to configuration file.\n");
@@ -56,53 +36,46 @@ usage() {
     exit(EXIT_FAILURE);
 }
 
-void
-handle_signal(int s) {
+void handle_signal(int s) {
     run = 0;
 }
 
-int
-daemonize(void) {
+int daemonize(void) {
     pid_t pid, sid;
     int fd;
 
-    // fork off the parent process
+    flog(logfile, "[DEBUG] Enter daemonize()\n");
+
     pid = fork();
     if (pid < 0) {
+        flog(logfile, "[DEBUG] fork() failed\n");
         exit(EXIT_FAILURE);
     }
 
-    // if we got a good PID, then we can exit the parent process
     if (pid > 0) {
+        flog(logfile, "[DEBUG] Parent process exits, child PID: %d\n", pid);
         exit(EXIT_SUCCESS);
     }
 
-    // change the file mode mask
     umask(0);
 
-    // open, check and write pid to file
     fd = open(pidfile_path, O_RDONLY);
     if (fd >= 0) {
         char pidbuf[16];
-
-        // read the contents of the PID file
         read(fd, pidbuf, sizeof(pidbuf));
         close(fd);
-
-        // check if the process with the PID in the file is still running
         pid_t pid_from_file = atoi(pidbuf);
+
+        flog(logfile, "[DEBUG] Existing PID file detected: %d\n", pid_from_file);
+
         if (pid_from_file > 0 && kill(pid_from_file, 0) == 0) {
-            // log that the process is already running
-            flog(logfile,
-                 "process already running with PID %d\n",
-                 pid_from_file);
+            flog(logfile, "process already running with PID %d\n", pid_from_file);
             exit(EXIT_FAILURE);
         }
 
-        // write the PID to the PID file
         fd = open(pidfile_path, O_RDWR | O_CREAT, 0640);
         if (fd < 0) {
-            flog(logfile, "unable to open PID file\n");
+            flog(logfile, "[DEBUG] unable to write PID file\n");
             exit(EXIT_FAILURE);
         }
 
@@ -110,36 +83,34 @@ daemonize(void) {
         write(fd, pidbuf, strlen(pidbuf));
         close(fd);
     } else {
-        flog(logfile, "unable to open PID file\n");
+        flog(logfile, "[DEBUG] unable to open PID file\n");
         exit(EXIT_FAILURE);
     }
 
     set_logfile(logfile_path);
+    flog(logfile, "[DEBUG] logfile redirected to %s\n", logfile_path);
 
-    // create a new SID for the child process
     sid = setsid();
     if (sid < 0) {
-        flog(logfile, "unable to create new SID for child process\n");
+        flog(logfile, "[DEBUG] setsid() failed\n");
         exit(EXIT_FAILURE);
     }
 
-    // change the current working directory
-    if ((chdir("/")) < 0) {
-        flog(logfile, "unable to change working directory to '/'\n");
+    if (chdir("/") < 0) {
+        flog(logfile, "[DEBUG] chdir('/') failed\n");
         exit(EXIT_FAILURE);
     }
-
-    // close out the standard file descriptors
-    // close(STDIN_FILENO);
-    // close(STDOUT_FILENO);
-    // close(STDERR_FILENO);
 
     return 0;
 }
 
-int
-main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     logfile = stderr;
+
+    // 强制启用文件日志（无论是否 daemon）
+    set_logfile(logfile_path);
+
+    flog(logfile, "[DEBUG] Program start\n");
 
     filter_t *filter_list = NULL;
     config_t config;
@@ -148,31 +119,33 @@ main(int argc, char *argv[]) {
     int rc = 0;
     struct mosquitto *mosq;
 
-    // Handle signals
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
-    // Parse command line arguments
-    // -c <configfile> [-d] [-v] [-h]
     char *configfile = NULL;
     int debug = 0;
     int verbose = 0;
     int daemon = 0;
 
     int c;
+    flog(logfile, "[DEBUG] Parsing command arguments...\n");
     while ((c = getopt(argc, argv, "c:Ddhv")) != -1) {
         switch (c) {
         case 'c':
             configfile = optarg;
+            flog(logfile, "[DEBUG] Argument -c detected, file=%s\n", configfile);
             break;
         case 'D':
-            daemon = true;
+            daemon = 1;
+            flog(logfile, "[DEBUG] Argument -D enable daemon mode\n");
             break;
         case 'd':
             debug = 1;
+            flog(logfile, "[DEBUG] Argument -d enable debug\n");
             break;
         case 'v':
             verbose = 1;
+            flog(logfile, "[DEBUG] Argument -v enable verbose\n");
             break;
         case 'h':
         default:
@@ -181,7 +154,9 @@ main(int argc, char *argv[]) {
         }
     }
 
-    // Default values for config
+    /* Default values */
+    flog(logfile, "[DEBUG] Setting default config values\n");
+
     config.mqtt_protocol_version = MQTT_PROTOCOL_V311;
     config.qos = 0;
     config.retain = 0;
@@ -189,27 +164,34 @@ main(int argc, char *argv[]) {
     config.port = 1883;
     config.timeout = 10;
     config.reconnect_delay = 5;
-    config.verify_ca_cert = 1; // verify server certificate
+    config.verify_ca_cert = 1;
+
     strncpy(config.host, "localhost", sizeof(config.host) - 1);
     strncpy(config.request_topic, "request", sizeof(config.request_topic) - 1);
-    strncpy(
-        config.response_topic, "response", sizeof(config.response_topic) - 1);
+    strncpy(config.response_topic, "response", sizeof(config.response_topic) - 1);
     strncpy(config.tls_version, "tlsv1.1", sizeof(config.tls_version) - 1);
     sprintf(config.client_id, "openmmg_client_%d", getpid());
 
     if (configfile == NULL) {
-        // load config from default locations
-        char *config_files[] = {"/etc/openmmg/openmmg.conf",
-                                "/etc/openmmg/settings.conf",
-                                "./openmmg.conf",
-                                NULL};
+        char *config_files[] = {
+            "/etc/openmmg/openmmg.conf",
+            "/etc/openmmg/settings.conf",
+            "./openmmg.conf",
+            NULL
+        };
 
         int i = 0;
         while (config_files[i] != NULL) {
-            // check if the file exists
+            flog(logfile, "[DEBUG] Trying config file: %s\n", config_files[i]);
+
             if (access(config_files[i], F_OK) != -1) {
+                flog(logfile, "[DEBUG] File exists, calling config_parse()\n");
+
                 if (config_parse(config_files[i], &config) == 0) {
+                    flog(logfile, "[DEBUG] config_parse SUCCESS: %s\n", config_files[i]);
                     break;
+                } else {
+                    flog(logfile, "[DEBUG] config_parse FAILED on %s\n", config_files[i]);
                 }
             }
             i++;
@@ -219,7 +201,10 @@ main(int argc, char *argv[]) {
             flog(logfile, "unable to load config file\n");
             exit(EXIT_FAILURE);
         }
+
     } else {
+        flog(logfile, "[DEBUG] Using user-specified config: %s\n", configfile);
+
         if (access(configfile, F_OK) != -1) {
             if (config_parse(configfile, &config) != 0) {
                 flog(logfile, "unable to load config file\n");
@@ -228,7 +213,8 @@ main(int argc, char *argv[]) {
         }
     }
 
-    // validate config
+    /* validate config */
+    flog(logfile, "[DEBUG] Validating config...\n");
     int err = validate_config(&config);
     if (err != 0) {
         flog(logfile, "invalid format of config file (%d)\n", err);
@@ -236,117 +222,104 @@ main(int argc, char *argv[]) {
     }
 
     if (daemon) {
+        flog(logfile, "[DEBUG] Entering daemon mode\n");
         if (daemonize() != 0) {
             flog(logfile, "unable to start as daemon\n");
             exit(EXIT_FAILURE);
         }
     }
 
-    // set log file
-    // set_logfile(logfile_path);
-
-    if (verbose) {
-        // print the loaded rules
-        flog_filter(logfile, filter_list);
-    }
-
     flog(logfile, "starting Open MQTT Modbus Gateway\n");
 
-    // Initialize the mosquitto library
+    /* Initialize MQTT */
+    flog(logfile, "[DEBUG] mosquitto_lib_init()\n");
     mosquitto_lib_init();
 
-    // Create a new mosquitto client instance
+    flog(logfile, "[DEBUG] mosquitto_new client_id=%s\n", config.client_id);
     mosq = mosquitto_new(config.client_id, true, &config);
-    if (mosq) {
-        mosquitto_threaded_set(mosq, 1); // Enable threading
 
-        // Set callbacks
+    if (mosq) {
+        flog(logfile, "[DEBUG] mosq non-null, configuring callbacks\n");
+
+        mosquitto_threaded_set(mosq, 1);
+
         mosquitto_connect_callback_set(mosq, mqtt_connect_callback);
         mosquitto_message_callback_set(mosq, mqtt_message_callback);
 
-        // Set username and password if not null in config
+        /* username/password */
         if (strlen(config.username) > 0 && strlen(config.password) > 0) {
-            if (mosquitto_username_pw_set(
-                    mosq, config.username, config.password) !=
-                MOSQ_ERR_SUCCESS) {
-                flog(logfile, "Unable to set username and password\n");
+            flog(logfile, "[DEBUG] Setting MQTT username/password\n");
+
+            if (mosquitto_username_pw_set(mosq, config.username, config.password) != MOSQ_ERR_SUCCESS) {
+                flog(logfile, "[DEBUG] Unable to set username/password\n");
                 goto terminate;
             }
         }
 
-        // Set TLS options if not null in config
+        /* TLS */
         if (strlen(config.ca_cert_path) > 0) {
+            flog(logfile, "[DEBUG] TLS enabled, checking certs\n");
+
             char *ca_cert = config.ca_cert_path;
             char *cert = NULL;
             char *key = NULL;
 
-            // Check if cert and key are provided
-            if (strlen(config.cert_path) > 0 || strlen(config.key_path) > 0) {
-                if (strlen(config.cert_path) > 0 &&
-                    strlen(config.key_path) > 0) {
-                    cert = config.cert_path;
-                    key = config.key_path;
-                } else {
-                    flog(logfile,
-                         "Unable to set TLS options: cert and key must be "
-                         "provided together\n");
-                    goto terminate;
-                }
+            if (strlen(config.cert_path) > 0 && strlen(config.key_path) > 0) {
+                cert = config.cert_path;
+                key = config.key_path;
+                flog(logfile, "[DEBUG] TLS using client cert+key\n");
             }
 
             int ret = mosquitto_tls_set(mosq, ca_cert, NULL, cert, key, NULL);
-            if (ret != MOSQ_ERR_SUCCESS) {
-                flog(logfile, "Unable to set TLS options\n");
-                goto terminate;
-            }
+            flog(logfile, "[DEBUG] mosquitto_tls_set ret=%d\n", ret);
+            if (ret != MOSQ_ERR_SUCCESS) goto terminate;
 
-            // Set TLS version
-            if (strlen(config.tls_version) > 0) {
-                if (mosquitto_tls_opts_set(mosq, 1, config.tls_version, NULL) !=
-                    MOSQ_ERR_SUCCESS) {
-                    flog(logfile, "Unable to set TLS version\n");
-                    goto terminate;
-                }
-            }
-
-            // Verify the broker certificate
-            if (config.verify_ca_cert) {
-                mosquitto_tls_insecure_set(mosq, false);
-            } else {
-                mosquitto_tls_insecure_set(mosq, true);
-            }
+            flog(logfile, "[DEBUG] Setting TLS version = %s\n", config.tls_version);
+            mosquitto_tls_opts_set(mosq, 1, config.tls_version, NULL);
         }
 
-        // MQTT protocol version
-        mosquitto_opts_set(
-            mosq, MOSQ_OPT_PROTOCOL_VERSION, &config.mqtt_protocol_version);
+        /* MQTT protocol */
+        flog(logfile, "[DEBUG] Setting MQTT protocol version\n");
+        mosquitto_opts_set(mosq, MOSQ_OPT_PROTOCOL_VERSION, &config.mqtt_protocol_version);
 
-        // Connect to the broker
-        rc = mosquitto_connect(mosq, config.host, config.port, 60);
-        if (rc) {
-            flog(logfile,
-                 "Unable to connect to broker: %s\n",
-                 mosquitto_strerror(rc));
-            goto terminate;
-        }
+        /* connect */
+        flog(logfile, "[DEBUG] Connecting to broker host=%s port=%d\n",
+             config.host, config.port);
 
-        // Start the main loop
+        rc = mosquitto_connect(mosq, config.host, config.port, config.keepalive);
+        flog(logfile, "[DEBUG] mosquitto_connect rc=%d (%s)\n",
+             rc, mosquitto_strerror(rc));
+
+        if (rc) goto terminate;
+
+        /* main loop */
+        flog(logfile, "[DEBUG] Entering mosquitto_loop()\n");
+
         while (run) {
             rc = mosquitto_loop(mosq, -1, 1);
-            if (run && rc) {
-                flog(logfile, "connection error: %s\n", mosquitto_strerror(rc));
+
+            if (rc && run) {
+                flog(logfile, "[DEBUG] mosquitto_loop error=%d (%s)\n",
+                     rc, mosquitto_strerror(rc));
+
                 sleep(10);
+                flog(logfile, "[DEBUG] Attempting reconnect...\n");
                 mosquitto_reconnect(mosq);
             }
         }
-    terminate:
+
+terminate:
+        flog(logfile, "[DEBUG] Terminating MQTT client\n");
         mosquitto_destroy(mosq);
+    } else {
+        flog(logfile, "[DEBUG] mosquitto_new returned NULL\n");
     }
 
     mosquitto_lib_cleanup();
+    flog(logfile, "[DEBUG] mosquitto_lib_cleanup done\n");
 
-    // close log file
     if (logfile != NULL) {
+        flog(logfile, "[DEBUG] Closing logfile\n");
         fclose(logfile);
     }
 
