@@ -297,7 +297,9 @@ int main(int argc, char *argv[]) {
 
         while (run) {
             rc = mosquitto_loop(mosq, -1, 1);
-
+            if (rc != MOSQ_ERR_SUCCESS) {
+                flog(logfile, "[DEBUG] mosquitto_loop error: %d (%s)\n", rc, mosquitto_strerror(rc));
+            }
             if (rc && run) {
                 flog(logfile, "[DEBUG] mosquitto_loop error=%d (%s)\n",
                      rc, mosquitto_strerror(rc));
